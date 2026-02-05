@@ -1,0 +1,45 @@
+trigger:
+  - none
+
+# PR trigger to master
+pr:
+  branches:
+    include:
+      - master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  PYTHON_VERSION: "3.11"
+
+steps:
+
+# Checkout with full git history
+- checkout: self
+  fetchDepth: 0
+  persistCredentials: true
+
+# Select Python version
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: $(PYTHON_VERSION)
+  displayName: "Use Python $(PYTHON_VERSION)"
+
+# Install uv
+- script: |
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    echo "##vso[task.prependpath]$HOME/.local/bin"
+    uv --version
+  displayName: "Install uv"
+
+
+# Install dependencies
+- script: |
+    uv sync --extra test
+  displayName: "Install dependencies"
+
+# Run pytest
+- script: |
+    uv run pytest -m "not ci_exclude"
+  displayName: "Run pytest"

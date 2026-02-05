@@ -1,0 +1,96 @@
+name: CI-CD
+
+trigger:
+  - none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  PYTHON_VERSION: "3.11"
+
+stages:
+
+##################################################
+# STAGE 1 — VALIDATE / BUILD
+##################################################
+- stage: Validate
+  displayName: Validate & Test
+
+  jobs:
+  - job: CI
+    displayName: Run CI Checks
+
+    steps:
+    - checkout: self
+      fetchDepth: 0
+
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: $(PYTHON_VERSION)
+
+    - script: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "##vso[task.prependpath]$HOME/.local/bin"
+      displayName: Install uv
+
+    - script: |
+        uv sync --extra test
+      displayName: Install deps
+
+    - script: |
+        uv run pytest -m "not ci_exclude"
+      displayName: Run tests
+
+
+##################################################
+# STAGE 2 — DEPLOY
+##################################################
+- stage: Deploy
+  displayName: Deploy to Databricks
+  dependsOn: Validate
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+
+  jobs:
+  - job: CD
+    displayName: Deploy Job
+
+    steps:
+    - checkout: self
+      persistCredentials: true
+
+    # Install Databricks CLI
+    - script: |
+        curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+      displayName: Install Databricks CLI
+
+    # Configure Databricks
+    - script: |
+        mkdir -p ~/.databricks
+        cat > ~/.databrickscfg << EOF
+        [DEFAULT]
+        host = $(DATABRICKS_HOST)
+        client_id = $(DATABRICKS_CLIENT_ID)
+        client_secret = $(DATABRICKS_CLIENT_SECRET)
+        EOF
+      displayName: Configure Databricks
+
+    # Install uv
+    - script: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "##vso[task.prependpath]$HOME/.local/bin"
+      displayName: Install uv
+
+    # Bundle Deploy
+    - script: |
+        export DATABRICKS_BUNDLE_ENV=acc
+
+        databricks bundle deploy \
+      displayName: Bundle Deploy
+
+    # Bundle Run (execute job)
+    - script: |
+        export DATABRICKS_BUNDLE_ENV=acc
+
+        databricks bundle run deployment
+      displayName: Bundle Run
